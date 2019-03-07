@@ -64,10 +64,17 @@ if __name__ == '__main__':
     n = 10000
     Anp = nx.laplacian_matrix(nx.gnm_random_graph(n,15*n))+.1*sparse.eye(n)
     Mnp = sparse.diags(1./Anp.diagonal())
-    bnp = np.random.randn(n, 100)
+    bnp = np.random.randn(n, 50)
     A = sparse_numpy_to_torch(Anp)
     M = sparse_numpy_to_torch(Mnp)
-    b = torch.from_numpy(bnp).float()
+    B = torch.from_numpy(bnp).float()
 
-    X, info = cg(A, b, M)
-    print (info)
+    X, info = cg(A, B, M, tol=1e-5)
+    print ((torch.norm(torch.mm(A, X) - B)**2).item())
+
+    res_sq = 0.
+    for i in range(50):
+        b = bnp[:,i]
+        x = cg_np(Anp, b, M=Mnp)[0]
+        res_sq += np.linalg.norm(Anp@x-b)**2
+    print (res_sq)
