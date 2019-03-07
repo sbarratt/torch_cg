@@ -1,32 +1,50 @@
 import torch
+import IPython as ipy
+import copy
 
-def spmv(A,x):
-    return torch.mm(A,x[:,None]).squeeze()
-
-def cg(A,b,M,x0,maxiter=None,rtol=1e-3,atol=1e-3):
+def cg(A, B, M, X0=None, tol=1e-3, maxiter=None, atol=0.):
+    n = len(B)
     if maxiter is None:
-        maxiter = 2*A.shape[0]
-    rs, zs, ps, xs = [], [], [None], [x0]
+        maxiter = 10*n
+    X = X0 if X0 is not None else torch.mm(M, B)
+
+    norm_B = torch.norm(B)
+    residual = lambda X: B - torch.mm(A, X)
+    done = lambda X: torch.norm(residual(X)) <= max(tol*norm_B, atol)
+
     k = 0
-    rs += [b-spmv(A,xs[k])]
-    optimal = False
-    while k < maxiter:
-        zs += [spmv(M,rs[k])]
+    X_k = X
+    R_k = residual(X_k)
+    optimal = True
+    while not done(X_k):
+        Z_k = torch.mm(M, R_k)
         k = k + 1
-        if k == 1:
-            ps += [zs[0]]
-        else:
-            beta = rs[k-1]@zs[k-1]/(rs[k-2]@zs[k-2])
-            ps += [zs[k-1] + beta*ps[k-1]]
-        alpha = (rs[k-1]@zs[k-1])/(ps[k]@spmv(A,ps[k]))
-        xs += [xs[k-1] + alpha*ps[k]]
-        rs += [rs[k-1] - alpha*spmv(A,ps[k])]
-        if torch.norm(rs[-1]) <= max(rtol*torch.norm(b),atol):
-            optimal = True
+        if k == maxiter:
+            optimal = False
             break
-        if k > 2:
-            rs[k-3] = zs[k-3] = ps[k-3] = xs[k-3] = None
-    return xs[-1], {"optimal":optimal,"|r|":torch.norm(rs[-1]).item()}
+        elif k == 1:
+            P_k = Z_k
+            R_k1 = R_k
+            X_k1 = X_k
+            Z_k1 = Z_k
+        else:
+            R_k2 = R_k1
+            Z_k2 = Z_k1
+            P_k1 = P_k
+            R_k1 = R_k
+            Z_k1 = Z_k
+            X_k1 = X_k
+            beta = (R_k1*Z_k1).sum(dim=0) / (R_k2*Z_k2).sum(dim=0)
+            P_k = Z_k1 + beta*P_k1
+
+        alpha = (R_k1*Z_k1).sum(dim=0) / (P_k*torch.mm(A,P_k)).sum(dim=0)
+        X_k = X_k1 + alpha * P_k
+        R_k = R_k1 - alpha * torch.mm(A, P_k)
+    return X_k, {
+        "optimal": optimal,
+        "|R|": torch.norm(residual(X_k)).item(),
+        "niter": k
+    }
 
 def sparse_numpy_to_torch(A):
     A = A.tocoo()
@@ -40,15 +58,16 @@ def sparse_numpy_to_torch(A):
 if __name__ == '__main__':
     import networkx as nx
     from scipy import sparse
+    from scipy.sparse.linalg import cg as cg_np
     import numpy as np
 
     n = 10000
-    A = nx.laplacian_matrix(nx.gnm_random_graph(n,15*n))+.01*sparse.eye(n)
-    M = sparse.diags(1./A.diagonal())
-    A = sparse_numpy_to_torch(A)
-    M = sparse_numpy_to_torch(M)
-    b = torch.randn(n)
+    Anp = nx.laplacian_matrix(nx.gnm_random_graph(n,15*n))+.1*sparse.eye(n)
+    Mnp = sparse.diags(1./Anp.diagonal())
+    bnp = np.random.randn(n, 100)
+    A = sparse_numpy_to_torch(Anp)
+    M = sparse_numpy_to_torch(Mnp)
+    b = torch.from_numpy(bnp).float()
 
-    x, info = cg(A,b,M,torch.zeros(n))
-    print (torch.mm(A,x[:,None]).squeeze()-b)
+    X, info = cg(A, b, M)
     print (info)
