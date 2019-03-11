@@ -1,0 +1,6 @@
+cg.cpp
+setup.py
+cg_cpp.egg-info/PKG-INFO
+cg_cpp.egg-info/SOURCES.txt
+cg_cpp.egg-info/dependency_links.txt
+cg_cpp.egg-info/top_level.txt
