@@ -17,15 +17,21 @@ def sparse_numpy_to_torch(A):
     return torch.sparse.FloatTensor(i, v, torch.Size(shape))
 
 if __name__ == '__main__':
+    cuda = torch.cuda.is_available()
+
     n = 100000
     m = 1000
     Anp = nx.laplacian_matrix(
         nx.gnm_random_graph(n, 5 * n)) + .1 * sparse.eye(n)
     Mnp = sparse.diags(1. / Anp.diagonal())
     bnp = np.random.randn(n, m)
-    A = sparse_numpy_to_torch(Anp).cuda()
-    M = sparse_numpy_to_torch(Mnp).cuda()
-    B = torch.from_numpy(bnp).float().cuda()
+    A = sparse_numpy_to_torch(Anp)
+    M = sparse_numpy_to_torch(Mnp)
+    B = torch.from_numpy(bnp).float()
+    if cuda:
+        A = A.cuda()
+        M = M.cuda()
+        B = B.cuda()
 
     start = time.time()
     X = cg(A, B, M, tol=1e-5)

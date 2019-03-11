@@ -9,7 +9,7 @@ Installatation:
 $ python setup.py install
 ```
 
-Run tests (GPU required):
+Run tests:
 ```
 $ cd torch_cg
 $ python test.py
