@@ -1,1 +1,1 @@
-from .torch_cg import cg
+from .torch_cg import CG
