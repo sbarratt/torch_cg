@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Function
 import IPython as ipy
-from cg import cg_cpp
+from cg_cpp import cg_cpp
 
 
 class CG(Function):
