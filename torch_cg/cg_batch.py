@@ -30,7 +30,7 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
     Z_k2 = Z_k
 
     if verbose:
-        print("%03s | %010s %06s" % ("it", "res", "it/s"))
+        print("%03s | %010s %06s" % ("it", "max res", "it/s"))
 
     start = time.perf_counter()
     for k in range(1, maxiter + 1):
@@ -49,7 +49,7 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
             R_k1 = R_k
             Z_k1 = Z_k
             X_k1 = X_k
-            beta = (R_k1 * Z_k1).sum(1) / (R_k2 * Z_k2).sum(1)
+            beta = (R_k1 * Z_k1).sum(1) / (1e-7 + R_k2 * Z_k2).sum(1)
             P_k = Z_k1 + beta.unsqueeze(1) * P_k1
 
         alpha = (R_k1 * Z_k1).sum(1) / (P_k * A_bmm(P_k)).sum(1)
@@ -57,7 +57,7 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
         R_k = R_k1 - alpha.unsqueeze(1) * A_bmm(P_k)
         end_iter = time.perf_counter()
 
-        residual = torch.norm(A_bmm(X_k) - B).item()
+        residual = (A_bmm(X_k)-B).norm(dim=1).max().item()
         if residual < tol:
             break
         if verbose:
@@ -68,8 +68,9 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
     if verbose:
         print("Terminated in %d steps. Took %.3f ms." %
               (k, (end - start) * 1000))
+    info = {'n_steps': k}
 
-    return X_k
+    return X_k, info
 
 if __name__ == '__main__':
     import networkx as nx
@@ -127,5 +128,5 @@ if __name__ == '__main__':
         return Y.view(K, n, m)
 
     print(f"Solving K={K} linear systems  that are {n} x {n} with {As[0].nnz} nonzeros and {m} right hand sides.")
-    X = cg_batch(A_bmm, B_torch, M_bmm, maxiter=10, verbose=True)
-    X = cg_batch(A_bmm_2, B_torch, M_bmm_2, maxiter=10, verbose=True)
+    X, _ = cg_batch(A_bmm, B_torch, M_bmm, maxiter=10, verbose=True)
+    X, _ = cg_batch(A_bmm_2, B_torch, M_bmm_2, maxiter=10, verbose=True)
