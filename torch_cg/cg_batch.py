@@ -49,10 +49,10 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
             R_k1 = R_k
             Z_k1 = Z_k
             X_k1 = X_k
-            beta = (R_k1 * Z_k1).sum(1) / (1e-7 + R_k2 * Z_k2).sum(1)
+            beta = (R_k1 * Z_k1).sum(1) / (1e-19 + R_k2 * Z_k2).sum(1)
             P_k = Z_k1 + beta.unsqueeze(1) * P_k1
 
-        alpha = (R_k1 * Z_k1).sum(1) / (P_k * A_bmm(P_k)).sum(1)
+        alpha = (R_k1 * Z_k1).sum(1) / (1e-19 + P_k * A_bmm(P_k)).sum(1)
         X_k = X_k1 + alpha.unsqueeze(1) * P_k
         R_k = R_k1 - alpha.unsqueeze(1) * A_bmm(P_k)
         end_iter = time.perf_counter()
