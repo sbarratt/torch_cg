@@ -50,6 +50,6 @@ from torch_cg import CG
 # solve AX=B using preconditioner M
 X = CG(B)(A_bmm, M_bmm)
 
-# take derivative of sum(X) with respect to A and B
+# take derivative of sum(X) with respect to B
 X.sum().backward()
 ```
