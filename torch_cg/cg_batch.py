@@ -1,15 +1,38 @@
 import torch
-import IPython as ipy
 import time
 
 
-def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
+def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None, verbose=False):
+    """Solves a batch of PD matrix linear systems using the preconditioned CG algorithm.
+
+    This function solves a batch of matrix linear systems of the form
+
+        A_i X_i = B_i,  i=1,...,K,
+
+    where A_i is a n x n positive definite matrix and B_i is a n x m matrix,
+    and X_i is the n x m matrix representing the solution for the ith system.
+
+    Args:
+        A_bmm: A callable that performs a batch matrix multiply of A and a K x n x m matrix.
+        B: A K x n x m matrix representing the right hand sides.
+        M_bmm: (optional) A callable that performs a batch matrix multiply of the preconditioning
+            matrices M and a K x n x m matrix. (default=identity matrix)
+        X0: (optional) Initial guess for X, defaults to M_bmm(B). (default=None)
+        tol: (optional) Tolerance for norm of residual. (default=1e-3)
+        stop: (optional) Form of stopping condition.
+            'max' for worst case tolerance across all batches and right hand sides,
+            or 'mean' for average tolerance. (default='mean')
+        maxiter: (optional) Maximum number of iterations to perform. (default=5*n)
+        verbose: (optional) Whether or not to print status messages. (default=False)
+    """
     K, n, m = B.shape
 
+    if M_bmm is None:
+        M_bmm = lambda x: x
     if X0 is None:
-        X0 = torch.zeros_like(B)
+        X0 = M_bmm(B)
     if maxiter is None:
-        maxiter = 10 * n
+        maxiter = 5 * n
 
     assert B.shape == (K, n, m)
     assert X0.shape == (K, n, m)
@@ -57,7 +80,10 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
         R_k = R_k1 - alpha.unsqueeze(1) * A_bmm(P_k)
         end_iter = time.perf_counter()
 
-        residual = torch.norm(A_bmm(X_k) - B).item()
+        if stop == 'mean':
+            residual = torch.norm(A_bmm(X_k) - B).item() / (K * m)
+        else:
+            return NotImplemented
         if residual < tol:
             break
         if verbose:
@@ -71,61 +97,23 @@ def cg_batch(A_bmm, B, M_bmm, X0=None, tol=1e-3, maxiter=None, verbose=False):
 
     return X_k
 
-if __name__ == '__main__':
-    import networkx as nx
-    from scipy import sparse
-    import scipy.sparse.linalg as splinalg
-    import numpy as np
-    import multiprocessing as mp
-    import time
-    import IPython as ipy
 
-    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+class CG(torch.autograd.Function):
 
-    def sparse_numpy_to_torch(A):
-        rows, cols = A.nonzero()
-        values = A.data
-        indices = np.vstack((rows, cols))
-        i = torch.cuda.LongTensor(indices)
-        v = torch.cuda.FloatTensor(values)
-        return torch.cuda.sparse.FloatTensor(i, v, A.shape)
+    def __init__(self, A_bmm, M_bmm=None, tol=1e-3, stop='mean', maxiter=None, verbose=False):
+        self.A_bmm = A_bmm
+        self.M_bmm = M_bmm
+        self.tol = tol
+        self.stop = stop
+        self.maxiter = maxiter
+        self.verbose = verbose
 
-    n = 5000
-    m = 1
-    K = 128
-    As = [nx.laplacian_matrix(
-        nx.gnm_random_graph(n, 10 * n)) + .1 * sparse.eye(n) for _ in range(K)]
-    Ms = [sparse.diags(1. / A.diagonal(), format='csc') for A in As]
-    A_bdiag = sparse.block_diag(As)
-    M_bdiag = sparse.block_diag(Ms)
-    Bs = [np.random.randn(n, m) for _ in range(K)]
-    As_torch = [None] * K
-    Ms_torch = [None] * K
-    B_torch = torch.cuda.FloatTensor(K, n, m)
-    A_bdiag_torch = sparse_numpy_to_torch(A_bdiag)
-    M_bdiag_torch = sparse_numpy_to_torch(M_bdiag)
+    def forward(self, B, X0=None):
+        X = cg_batch(self.A_bmm, B, M_bmm=self.M_bmm, X0=X0, stop=self.stop, tol=self.tol,
+                     maxiter=self.maxiter, verbose=self.verbose)
+        return X
 
-    for i in range(K):
-        As_torch[i] = sparse_numpy_to_torch(As[i])
-        Ms_torch[i] = sparse_numpy_to_torch(Ms[i])
-        B_torch[i] = torch.tensor(Bs[i])
-
-    def A_bmm(X):
-        Y = [(As_torch[i]@X[i]).unsqueeze(0) for i in range(K)]
-        return torch.cat(Y, dim=0)
-
-    def M_bmm(X):
-        Y = [(Ms_torch[i]@X[i]).unsqueeze(0) for i in range(K)]
-        return torch.cat(Y, dim=0)
-
-    def A_bmm_2(X):
-        Y = A_bdiag_torch@(X.view(K * n, m))
-        return Y.view(K, n, m)
-
-    def M_bmm_2(X):
-        Y = M_bdiag_torch@(X.view(K * n, m))
-        return Y.view(K, n, m)
-
-    print(f"Solving K={K} linear systems  that are {n} x {n} with {As[0].nnz} nonzeros and {m} right hand sides.")
-    X = cg_batch(A_bmm, B_torch, M_bmm, maxiter=10, verbose=True)
-    X = cg_batch(A_bmm_2, B_torch, M_bmm_2, maxiter=10, verbose=True)
+    def backward(self, dX):
+        dB = cg_batch(self.A_bmm, dX, M_bmm=self.M_bmm, X0=X0, stop=self.stop, tol=self.tol,
+                      maxiter=self.maxiter, verbose=self.verbose)
+        return dB

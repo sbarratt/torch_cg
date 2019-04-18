@@ -1,6 +1,14 @@
 import setuptools
-from torch.utils.cpp_extension import BuildExtension, CppExtension
 
-setuptools.setup(name='torch_cg',
-      ext_modules=[CppExtension('cg', ['cpp/cg.cpp'])],
-      cmdclass={'build_ext': BuildExtension})
+setuptools.setup(
+    name='torch_cg',
+    version='1.0.1',
+    author="Shane Barratt",
+    description='TODO',
+    license='TODO',
+    url='TODO',
+    packages=setuptools.find_packages(),
+    install_requires=[
+        "torch >= 1.0"
+    ]
+)
