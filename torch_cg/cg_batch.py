@@ -2,7 +2,7 @@ import torch
 import time
 
 
-def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None, verbose=False):
+def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-3, atol=0., maxiter=None, verbose=False):
     """Solves a batch of PD matrix linear systems using the preconditioned CG algorithm.
 
     This function solves a batch of matrix linear systems of the form
@@ -18,10 +18,8 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None,
         M_bmm: (optional) A callable that performs a batch matrix multiply of the preconditioning
             matrices M and a K x n x m matrix. (default=identity matrix)
         X0: (optional) Initial guess for X, defaults to M_bmm(B). (default=None)
-        tol: (optional) Tolerance for norm of residual. (default=1e-3)
-        stop: (optional) Form of stopping condition.
-            'max' for worst case tolerance across all batches and right hand sides,
-            or 'mean' for average tolerance. (default='mean')
+        rtol: (optional) Relative tolerance for norm of residual. (default=1e-3)
+        atol: (optional) Absolute tolerance for norm of residual. (default=1e-3)
         maxiter: (optional) Maximum number of iterations to perform. (default=5*n)
         verbose: (optional) Whether or not to print status messages. (default=False)
     """
@@ -36,7 +34,7 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None,
 
     assert B.shape == (K, n, m)
     assert X0.shape == (K, n, m)
-    assert tol > 0
+    assert rtol > 0 or atol > 0
     assert isinstance(maxiter, int)
 
     X_k = X0
@@ -52,9 +50,13 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None,
     Z_k1 = Z_k
     Z_k2 = Z_k
 
-    if verbose:
-        print("%03s | %010s %06s" % ("it", "res", "it/s"))
+    B_norm = torch.norm(B, dim=1)
+    stopping_matrix = torch.max(rtol*B_norm, atol*torch.ones_like(B_norm))
 
+    if verbose:
+        print("%03s | %010s %06s" % ("it", "dist", "it/s"))
+
+    optimal = False
     start = time.perf_counter()
     for k in range(1, maxiter + 1):
         start_iter = time.perf_counter()
@@ -80,40 +82,52 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, tol=1e-3, stop='mean', maxiter=None,
         R_k = R_k1 - alpha.unsqueeze(1) * A_bmm(P_k)
         end_iter = time.perf_counter()
 
-        if stop == 'mean':
-            residual = torch.norm(A_bmm(X_k) - B).item() / (K * m)
-        else:
-            return NotImplemented
-        if residual < tol:
-            break
+        residual_norm = torch.norm(A_bmm(X_k) - B, dim=1)
+
         if verbose:
             print("%03d | %8.4e %4.2f" %
-                  (k, residual, 1. / (end_iter - start_iter)))
+                  (k, torch.max(residual_norm-stopping_matrix),
+                    1. / (end_iter - start_iter)))
+
+        if (residual_norm <= stopping_matrix).all():
+            optimal = True
+            break
+
     end = time.perf_counter()
 
     if verbose:
-        print("Terminated in %d steps. Took %.3f ms." %
-              (k, (end - start) * 1000))
+        if optimal:
+            print("Terminated in %d steps (reached maxiter). Took %.3f ms." %
+                  (k, (end - start) * 1000))
+        else:
+            print("Terminated in %d steps (optimal). Took %.3f ms." %
+                  (k, (end - start) * 1000))
 
-    return X_k
+
+    info = {
+        "niter": k,
+        "optimal": optimal
+    }
+
+    return X_k, info
 
 
 class CG(torch.autograd.Function):
 
-    def __init__(self, A_bmm, M_bmm=None, tol=1e-3, stop='mean', maxiter=None, verbose=False):
+    def __init__(self, A_bmm, M_bmm=None, rtol=1e-3, atol=0., maxiter=None, verbose=False):
         self.A_bmm = A_bmm
         self.M_bmm = M_bmm
-        self.tol = tol
-        self.stop = stop
+        self.rtol = rtol
+        self.atol = atol
         self.maxiter = maxiter
         self.verbose = verbose
 
     def forward(self, B, X0=None):
-        X = cg_batch(self.A_bmm, B, M_bmm=self.M_bmm, X0=X0, stop=self.stop, tol=self.tol,
-                     maxiter=self.maxiter, verbose=self.verbose)
+        X, _ = cg_batch(self.A_bmm, B, M_bmm=self.M_bmm, X0=X0, rtol=self.rtol,
+                     atol=self.atol, maxiter=self.maxiter, verbose=self.verbose)
         return X
 
     def backward(self, dX):
-        dB = cg_batch(self.A_bmm, dX, M_bmm=self.M_bmm, X0=X0, stop=self.stop, tol=self.tol,
-                      maxiter=self.maxiter, verbose=self.verbose)
+        dB, _ = cg_batch(self.A_bmm, dX, M_bmm=self.M_bmm, X0=X0, rtol=self.rtol,
+                      atol=self.atol, maxiter=self.maxiter, verbose=self.verbose)
         return dB
