@@ -19,7 +19,7 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-3, atol=0., maxiter=None, ve
             matrices M and a K x n x m matrix. (default=identity matrix)
         X0: (optional) Initial guess for X, defaults to M_bmm(B). (default=None)
         rtol: (optional) Relative tolerance for norm of residual. (default=1e-3)
-        atol: (optional) Absolute tolerance for norm of residual. (default=1e-3)
+        atol: (optional) Absolute tolerance for norm of residual. (default=0)
         maxiter: (optional) Maximum number of iterations to perform. (default=5*n)
         verbose: (optional) Whether or not to print status messages. (default=False)
     """
@@ -74,10 +74,14 @@ def cg_batch(A_bmm, B, M_bmm=None, X0=None, rtol=1e-3, atol=0., maxiter=None, ve
             R_k1 = R_k
             Z_k1 = Z_k
             X_k1 = X_k
-            beta = (R_k1 * Z_k1).sum(1) / (R_k2 * Z_k2).sum(1)
+            denominator = (R_k2 * Z_k2).sum(1)
+            denominator[denominator == 0] = 1e-8
+            beta = (R_k1 * Z_k1).sum(1) / denominator
             P_k = Z_k1 + beta.unsqueeze(1) * P_k1
 
-        alpha = (R_k1 * Z_k1).sum(1) / (P_k * A_bmm(P_k)).sum(1)
+        denominator = (P_k * A_bmm(P_k)).sum(1)
+        denominator[denominator == 0] = 1e-8
+        alpha = (R_k1 * Z_k1).sum(1) / denominator
         X_k = X_k1 + alpha.unsqueeze(1) * P_k
         R_k = R_k1 - alpha.unsqueeze(1) * A_bmm(P_k)
         end_iter = time.perf_counter()
