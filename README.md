@@ -34,7 +34,7 @@ from torch_cg import CG
 # create A_bmm, B (requires grad), M_bmm
 
 # solve AX=B using preconditioner M
-X = CG(B)(A_bmm, M_bmm)
+X = CG(A_bmm, M_bmm)(B)
 
 # take derivative of sum(X) with respect to B
 X.sum().backward()
