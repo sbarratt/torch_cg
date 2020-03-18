@@ -132,6 +132,6 @@ class CG(torch.autograd.Function):
         return X
 
     def backward(self, dX):
-        dB, _ = cg_batch(self.A_bmm, dX, M_bmm=self.M_bmm, X0=X0, rtol=self.rtol,
+        dB, _ = cg_batch(self.A_bmm, dX, M_bmm=self.M_bmm, rtol=self.rtol,
                       atol=self.atol, maxiter=self.maxiter, verbose=self.verbose)
         return dB
