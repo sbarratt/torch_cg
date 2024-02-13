@@ -52,9 +52,10 @@ def bicgstab_batch(
     assert rtol > 0 or atol > 0
     assert isinstance(maxiter, int)
 
-    print("B: ", B, B.shape)
+    print("B: ", B.shape)
 
     # Initialize the variables for the BiCGSTAB algorithm. I am using the variable names as given in
+    # the Wikipedia article. Another reference for the algorithm is the book
     # Matrix Computations by Golub and Van Loan.
 
     X_k = X0
@@ -62,11 +63,12 @@ def bicgstab_batch(
     R_tilde = R_k.clone()
     P_k = R_k.clone()
 
-    inner_prods = _inner_prod(R_tilde, R_k)
+    rho_k = _inner_prod(R_tilde, R_k)
     assert (
-        inner_prods != torch.zeros_like(inner_prods)
+        rho_k != torch.zeros_like(rho_k)
     ).any(), "Initializing R_tilde failed. May have initialized at the optimum."
 
+    print("Rho_k: ", rho_k.shape)
     B_norm = torch.norm(B, dim=1)
     stopping_matrix = torch.max(rtol * B_norm, atol * torch.ones_like(B_norm))
     print("Stopping matrix: ", stopping_matrix.shape)
@@ -79,37 +81,34 @@ def bicgstab_batch(
         start_iter = time.perf_counter()
 
         # Update the variables for the BiCGSTAB algorithm
-        Ap_k = A_bmm(P_k)
-        print("Ap_k: ", Ap_k, Ap_k.shape)
+        nu_k = A_bmm(P_k)
 
         # Our objects have shape (K, n, m), so inner products are pointwise multiplication, then
         # summing over the n dimension.
 
-        mu = (_inner_prod(R_tilde, R_k) / _inner_prod(R_tilde, Ap_k)).unsqueeze(1)
-        print("Mu: ", mu, mu.shape)
-        S_k = R_k - mu * Ap_k
+        alpha = (rho_k / _inner_prod(R_tilde, nu_k)).unsqueeze(1)
+        print("Alpha: ", alpha.shape)
+        H_k = X_k + alpha * P_k
+        alpha_rho_k = alpha * rho_k.unsqueeze(1)
+        print("Alpha_rho_k: ", alpha_rho_k.shape)
+        print("R_k: ", R_k.shape)
+        S_k = R_k - alpha_rho_k
 
         # Test whether S_k is close enough to zero for an early exit
         S_norm = torch.norm(S_k, dim=1)
         if (S_norm <= stopping_matrix).all():
             optimal = True
-            X_k = X_k + mu * P_k
+            X_k = H_k
             break
 
-        As_k = A_bmm(S_k)
+        T_k = A_bmm(S_k)
 
-        omega = _inner_prod(S_k, As_k) / _inner_prod(As_k, As_k)
-        print("Omega: ", omega)
-        X_k = X_k + mu * P_k + omega * S_k
-        R_k_new = S_k - omega * As_k
-        tau = mu * _inner_prod(R_tilde, R_k_new) / (omega * _inner_prod(R_tilde, R_k))
-        print("Tau: ", tau)
-        P_k = R_k_new + tau * (P_k - omega * Ap_k)
-        R_k = R_k_new
+        omega = (_inner_prod(T_k, S_k) / _inner_prod(T_k, T_k)).unsqueeze(1)
+        print("Omega: ", omega.shape)
+        X_k = H_k + omega * S_k
+        R_k = S_k - omega * T_k
         end_iter = time.perf_counter()
-        print("P_k: ", P_k, P_k.shape)
-        print("R_k: ", R_k, R_k.shape)
-        print("X_k: ", X_k, X_k.shape)
+
         print("End of iteration")
         # Calculate the stopping criterion and check if we are done.
         residual_norm = torch.norm(A_bmm(X_k) - B, dim=1)

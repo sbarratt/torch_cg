@@ -84,7 +84,7 @@ class Test_bicgstab_batch:
             X0=None,
             rtol=1e-5,
             atol=1e-5,
-            maxiter=3,
+            maxiter=n + 1,
             verbose=False,
         )
         assert out.shape == (K, n, m)
