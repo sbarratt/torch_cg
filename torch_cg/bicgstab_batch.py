@@ -25,8 +25,6 @@ def bicgstab_batch(
     Args:
         A_bmm (Callable): A callable that performs a batch matrix multiply of A and a (K x n x m) matrix.
         B (torch.Tensor): A (K x n x m) matrix representing the right hand sides.
-        M_bmm (torch.Tensor, optional): A callable that performs a batch matrix multiply of the preconditioning
-            matrices M and a (K x n x m) matrix. Defaults to None.
         X0 (torch.Tensor, optional): Initial guess for X, defaults to M_bmm(B). Defaults to None.
         rtol (float, optional): Relative tolerance for norm of residual. Defaults to 1e-03.
         atol (float, optional): Absolute tolerance for norm of residual. Defaults to 0.0.
@@ -52,8 +50,6 @@ def bicgstab_batch(
     assert rtol > 0 or atol > 0
     assert isinstance(maxiter, int)
 
-    print("B: ", B)
-
     # Initialize the variables for the BiCGSTAB algorithm. I am using the variable names as given in
     # the Wikipedia article. Another reference for the algorithm is the book
     # Matrix Computations by Golub and Van Loan.
@@ -62,67 +58,51 @@ def bicgstab_batch(
     R_k = B - A_bmm(X_k)
     R_tilde = R_k.clone()
     P_k = R_k.clone()
-    print("P_0: ", P_k, P_k.shape)
 
     rho_k = _inner_prod(R_tilde, R_k).unsqueeze(1)
     assert (
         rho_k != torch.zeros_like(rho_k)
     ).any(), "Initializing R_tilde failed. May have initialized at the optimum."
 
-    print("Rho_k: ", rho_k.shape)
     B_norm = torch.norm(B, dim=1)
     stopping_matrix = torch.max(rtol * B_norm, atol * torch.ones_like(B_norm))
-    print("Stopping matrix: ", stopping_matrix)
     resid_norm_lst = []
     if verbose:
         print("%03s | %010s %06s" % ("it", "dist", "it/s"))
     optimal = False
     start = time.perf_counter()
     for k in range(1, maxiter + 1):
-        print("New iteration")
         start_iter = time.perf_counter()
 
         # Update the variables for the BiCGSTAB algorithm
         nu_k = A_bmm(P_k)
-        # print("Nu_k: ", nu_k, nu_k.shape)
 
         # Our objects have shape (K, n, m), so inner products are pointwise multiplication, then
         # summing over the n dimension.
 
         # alpha should have shape (K, m) but we expand it to (K, 1, m) to allow broadcasting
         alpha = rho_k / _inner_prod(R_tilde, nu_k).unsqueeze(1)
-        # print("Alpha: ", alpha, alpha.shape)
         H_k = X_k + alpha * P_k
-        # print("H_k: ", H_k, H_k.shape)
         alpha_nu_k = alpha * nu_k
-        # print("Alpha_nu_k: ", alpha_nu_k.shape)
         S_k = R_k - alpha_nu_k
-        # print("S_k: ", S_k, S_k.shape)
 
         # Test whether S_k is close enough to zero for an early exit
         S_norm = torch.norm(S_k, dim=1)
-        # print("S_norm: ", S_norm, S_norm.shape)
         if (S_norm <= stopping_matrix).all():
             optimal = True
             X_k = H_k
             break
 
         T_k = A_bmm(S_k)
-        # print("T_k: ", T_k)
-
         # Omega should have shape (K, m) but we expand it to (K, 1, m) to allow broadcasting
         omega = (_inner_prod(T_k, S_k) / _inner_prod(T_k, T_k)).unsqueeze(1)
-        # print("Omega: ", omega, omega.shape)
         X_k = H_k + omega * S_k
         R_k = S_k - omega * T_k
         end_iter = time.perf_counter()
-        # print("X_k: ", X_k, X_k.shape)
-        # print("R_k: ", R_k, R_k.shape)
 
         # Calculate the stopping criterion and check if we are done.
         residual_norm = torch.norm(A_bmm(X_k) - B, dim=1)
         resid_norm_lst.append(residual_norm.detach().numpy())
-        print("Residual norm: ", residual_norm)
         if verbose:
             print(
                 "%03d | %8.4e %4.2f"
@@ -138,17 +118,11 @@ def bicgstab_batch(
 
         # If not exiting, we need to update rho_k and P_k
         rho_kp1 = _inner_prod(R_tilde, R_k).unsqueeze(1)
-        # print("Rho_kp1: ", rho_kp1, rho_kp1.shape)
         beta_num = rho_kp1 * alpha
         beta_denom = rho_k * omega
-        # print("Beta_num: ", beta_num, beta_num.shape)
-        # print("Beta_denom: ", beta_denom, beta_denom.shape)
         beta = beta_num / beta_denom
         P_k = R_k + beta * (P_k - omega * nu_k)
         rho_k = rho_kp1
-        # print("Rho_k: ", rho_k, rho_k.shape)
-        # print("PK: ", P_k)
-        print("End of iteration", k)
 
     end = time.perf_counter()
     if verbose:
